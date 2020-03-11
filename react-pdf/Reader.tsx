@@ -31,6 +31,7 @@ interface Props {
     readerContainerNavigate?: any
     readerContainerNavigateArrow?: any
   }
+  reactPdfProps?: any;
 }
 
 interface State {
@@ -152,7 +153,7 @@ class Reader extends React.Component<Props, State> {
 
   render() {
     const { numPages, currentPage, error } = this.state
-    const { customStyle } = this.props
+    const { customStyle, reactPdfProps } = this.props
     if (error) {
       return <p>{error.message ? error.message : 'Sorry an error occurred!'}</p>
     }
@@ -168,6 +169,7 @@ class Reader extends React.Component<Props, State> {
               onLoadSuccess={this.onDocumentLoadSuccess}
               onLoadError={this.onError}
               onSourceError={this.onError}
+              {...(reactPdfProps || {})}
               {...{ options, file }}
             >
               {withScroll ? this.renderPages() : this.renderPage(currentPage)}
