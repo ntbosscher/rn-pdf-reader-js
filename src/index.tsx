@@ -24,6 +24,7 @@ export type RenderType =
   | 'BASE64_TO_LOCAL_PDF'
   | 'URL_TO_BASE64'
   | 'GOOGLE_READER'
+  | 'GOOGLE_DRIVE_VIEWER';
 
 export interface CustomStyle {
   readerContainer?: CSS.Properties<any>
@@ -50,7 +51,10 @@ export interface Props {
   noLoader?: boolean
   customStyle?: CustomStyle
   useGoogleReader?: boolean
+  useGoogleDriveViewer?: boolean
   withScroll?: boolean
+  withPinchZoom?: boolean
+  maximumPinchZoomScale?: number
   onLoad?(event: WebViewNavigationEvent): void
   onLoadEnd?(event: WebViewNavigationEvent | WebViewErrorEvent): void
   onError?(event: WebViewErrorEvent | WebViewHttpErrorEvent | string): void
@@ -68,6 +72,8 @@ function viewerHtml(
   base64: string,
   customStyle?: CustomStyle,
   withScroll: boolean = false,
+  withPinchZoom: boolean = false,
+  maximumPinchZoomScale: number = 5,
 ): string {
   return `
 <!DOCTYPE html>
@@ -75,7 +81,23 @@ function viewerHtml(
   <head>
     <title>PDF reader</title>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1.0, maximum-scale=${
+      withPinchZoom ? `${maximumPinchZoomScale}.0` : '1.0'
+    }, user-scalable=${withPinchZoom ? 'yes' : 'no'}" />
+    <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@2.1.266/build/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@2.1.266/web/pdf_viewer.min.js"></script>
+    <script
+      crossorigin
+      src="https://unpkg.com/react@16/umd/react.production.min.js"
+    ></script>
+    <script
+      crossorigin
+      src="https://unpkg.com/react-dom@16/umd/react-dom.production.min.js"
+    ></script>
+    <script>
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.1.266/build/pdf.worker.min.js'
+    </script>
     <script type="application/javascript">
       try {
         window.CUSTOM_STYLE = JSON.parse('${JSON.stringify(
@@ -109,13 +131,24 @@ async function writeWebViewReaderFileAsync(
   data: string,
   customStyle?: CustomStyle,
   withScroll?: boolean,
+  withPinchZoom?: boolean,
+  maximumPinchZoomScale?: number,
 ): Promise<void> {
   const { exists, md5 } = await getInfoAsync(bundleJsPath, { md5: true })
   const bundleContainer = require('./bundleContainer')
   if (__DEV__ || !exists || bundleContainer.getBundleMd5() !== md5) {
     await writeAsStringAsync(bundleJsPath, bundleContainer.getBundle())
   }
-  await writeAsStringAsync(htmlPath, viewerHtml(data, customStyle, withScroll))
+  await writeAsStringAsync(
+    htmlPath,
+    viewerHtml(
+      data,
+      customStyle,
+      withScroll,
+      withPinchZoom,
+      maximumPinchZoomScale,
+    ),
+  )
 }
 
 async function writePDFAsync(base64: string) {
@@ -129,12 +162,12 @@ async function writePDFAsync(base64: string) {
 export async function removeFilesAsync(): Promise<void> {
   const { exists: htmlPathExist } = await getInfoAsync(htmlPath)
   if (htmlPathExist) {
-    await deleteAsync(htmlPath)
+    await deleteAsync(htmlPath, { idempotent: true })
   }
 
   const { exists: pdfPathExist } = await getInfoAsync(pdfPath)
   if (pdfPathExist) {
-    await deleteAsync(pdfPath)
+    await deleteAsync(pdfPath, { idempotent: true })
   }
 }
 
@@ -181,7 +214,7 @@ async function urlToBlob(source: Source): Promise<Blob | undefined> {
     xhr.open('GET', source.uri!)
 
     if (source.headers && Object.keys(source.headers).length > 0) {
-      Object.keys(source.headers).forEach(key => {
+      Object.keys(source.headers).forEach((key) => {
         xhr.setRequestHeader(key, source.headers![key])
       })
     }
@@ -193,6 +226,8 @@ async function urlToBlob(source: Source): Promise<Blob | undefined> {
 
 const getGoogleReaderUrl = (url: string) =>
   `https://docs.google.com/viewer?url=${url}`
+const getGoogleDriveUrl = (url: string) =>
+  `https://drive.google.com/viewerng/viewer?embedded=true&url=${url}`
 
 const Loader = () => (
   <View
@@ -228,6 +263,7 @@ class PdfReader extends React.Component<Props, State> {
     } else if (
       (renderType === 'DIRECT_URL' ||
         renderType === 'GOOGLE_READER' ||
+        renderType === 'GOOGLE_DRIVE_VIEWER' ||
         renderType === 'URL_TO_BASE64') &&
       (!source.uri ||
         !(
@@ -253,12 +289,28 @@ class PdfReader extends React.Component<Props, State> {
 
   init = async () => {
     try {
-      const { source, customStyle, withScroll } = this.props
+      const {
+        source,
+        customStyle,
+        withScroll,
+        withPinchZoom,
+        maximumPinchZoomScale,
+      } = this.props
       const { renderType } = this.state
       switch (renderType!) {
+        case 'GOOGLE_DRIVE_VIEWER': {
+          break;
+        }
+        
         case 'URL_TO_BASE64': {
           const data = await fetchPdfAsync(source)
-          await writeWebViewReaderFileAsync(data!, customStyle, withScroll)
+          await writeWebViewReaderFileAsync(
+            data!,
+            customStyle,
+            withScroll,
+            withPinchZoom,
+            maximumPinchZoomScale,
+          )
           break
         }
 
@@ -267,6 +319,8 @@ class PdfReader extends React.Component<Props, State> {
             source.base64!,
             customStyle,
             withScroll,
+            withPinchZoom,
+            maximumPinchZoomScale,
           )
           break
         }
@@ -290,11 +344,16 @@ class PdfReader extends React.Component<Props, State> {
   getRenderType = () => {
     const {
       useGoogleReader,
+      useGoogleDriveViewer,
       source: { uri, base64 },
     } = this.props
 
     if (useGoogleReader) {
       return 'GOOGLE_READER'
+    }
+
+    if (useGoogleDriveViewer) {
+      return 'GOOGLE_DRIVE_VIEWER';
     }
 
     if (Platform.OS === 'ios') {
@@ -326,6 +385,8 @@ class PdfReader extends React.Component<Props, State> {
     switch (renderType!) {
       case 'GOOGLE_READER':
         return { uri: getGoogleReaderUrl(uri!) }
+      case 'GOOGLE_DRIVE_VIEWER':
+        return { uri: getGoogleDriveUrl(uri) };
       case 'DIRECT_BASE64':
       case 'URL_TO_BASE64':
         return { uri: htmlPath }
@@ -388,9 +449,14 @@ class PdfReader extends React.Component<Props, State> {
       webviewProps,
     } = this.props
 
-    const originWhitelist = ['http://*', 'https://*', 'file://*', 'data:*']
+    const originWhitelist = [
+      'http://*',
+      'https://*',
+      'file://*',
+      'data:*',
+      'content:*',
+    ]
     const style = [styles.webview, webviewStyle]
-
     const isAndroid = Platform.OS === 'android'
     if (ready) {
       const source: WebViewSource | undefined = this.getWebviewSource()
@@ -399,7 +465,7 @@ class PdfReader extends React.Component<Props, State> {
           <WebView
             {...{
               originWhitelist,
-              onLoad: event => {
+              onLoad: (event) => {
                 this.setState({ renderedOnce: true })
                 if (onLoad) {
                   onLoad(event)
@@ -412,6 +478,8 @@ class PdfReader extends React.Component<Props, State> {
               source: renderedOnce || !isAndroid ? source : undefined,
             }}
             allowFileAccess={isAndroid}
+            allowFileAccessFromFileURLs={isAndroid}
+            allowUniversalAccessFromFileURLs={isAndroid}
             scalesPageToFit={Platform.select({ android: false })}
             mixedContentMode={isAndroid ? 'always' : undefined}
             sharedCookiesEnabled={false}

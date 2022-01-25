@@ -34,14 +34,14 @@ module.exports = {
       },
     ],
   },
-  plugins: [
-    new webpack.optimize.LimitChunkCountPlugin({ maxChunks: 1 }),
-    new CopyWebpackPlugin([
-      { from: './index.html' },
-      {
-        from: 'node_modules/pdfjs-dist/cmaps/',
-        to: 'cmaps/',
-      },
-    ]),
-  ],
+  externals: {
+    react: 'React',
+    'react-dom': 'ReactDOM',
+    'pdfjs-dist': 'pdfjsLib',
+    'pdfjs-dist/lib/web/pdf_link_service': 'pdfjsViewer',
+  },
+  plugins: [new CopyWebpackPlugin([{ from: './index.html' }])],
+  optimization: {
+    minimize: true,
+  },
 }
