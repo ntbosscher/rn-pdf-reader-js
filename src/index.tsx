@@ -67,8 +67,9 @@ interface State {
 
 function viewerHtml(
   base64: string,
-  customStyle?: CustomStyle,
-  withScroll: boolean = false,
+  customStyle: CustomStyle | null,
+  withScroll: boolean,
+  bundleJS: any
 ): string {
   return `
 <!DOCTYPE html>
@@ -95,14 +96,14 @@ function viewerHtml(
   <body>
      <div id="file" data-file="${base64}"></div>
      <div id="react-container"></div>
-     <script type="text/javascript" src="bundle.js"></script>
+     <script type="text/javascript">${bundleJS}</script>
    </body>
 </html>
 `
 }
 
 // PATHS
-const bundleJsPath = `${cacheDirectory}bundle.js`
+// const bundleJsPath = `${cacheDirectory}bundle.js`
 const htmlPath = `${cacheDirectory}index.html`
 const pdfPath = `${cacheDirectory}file.pdf`
 
@@ -111,12 +112,8 @@ async function writeWebViewReaderFileAsync(
   customStyle?: CustomStyle,
   withScroll?: boolean,
 ): Promise<void> {
-  const { exists, md5 } = await getInfoAsync(bundleJsPath, { md5: true })
   const bundleContainer = require('./bundleContainer')
-  if (__DEV__ || !exists || bundleContainer.getBundleMd5() !== md5) {
-    await writeAsStringAsync(bundleJsPath, bundleContainer.getBundle())
-  }
-  await writeAsStringAsync(htmlPath, viewerHtml(data, customStyle, withScroll))
+  await writeAsStringAsync(htmlPath, viewerHtml(data, customStyle||null, withScroll || false, bundleContainer.getBundle()))
 }
 
 async function writePDFAsync(base64: string) {
@@ -413,7 +410,7 @@ class PdfReader extends React.Component<Props, State> {
               onError,
               onHttpError: onError,
               style,
-              source: renderedOnce || !isAndroid ? source : undefined,
+              source: renderedOnce || !isAndroid ? source : { html: '' },
             }}
             allowFileAccess={isAndroid}
             scalesPageToFit={Platform.select({ android: false })}
